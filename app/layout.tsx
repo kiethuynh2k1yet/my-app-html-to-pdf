@@ -1,19 +1,9 @@
 import type { Metadata } from "next";
-import { Poppins } from "next/font/google";
-import GlobalStyle from "./resetStyle";
 import StyledComponentsRegistry from "./lib/registry";
 
-const poppins = Poppins({
-  weight: '400',
-  subsets: ['latin'],
-})
-
 export const metadata: Metadata = {
-  title: "HTML To PDF",
-  description: "Image File HTML To PDF ",
-  icons: {
-    icon: "/Esport-Team-Logo.ico",
-  },
+  title: "HTML to PDF",
+  description: "Import HTML and export PDF A4",
 };
 
 export default function RootLayout({
@@ -22,14 +12,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={poppins.className}>
+    <html lang="vi">
       <body>
         <StyledComponentsRegistry>
-          <GlobalStyle />
           {children}
-        </StyledComponentsRegistry></body>
+        </StyledComponentsRegistry>
+      </body>
     </html>
   );
 }

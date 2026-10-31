@@ -1,13 +1,6 @@
-"use client";
 
-import ExportWrapper from "./component/export-wrapper";
-import { Wrapper, HeaderTitle } from "./styles";
+import HTMLToPDF from "./component/HTMLToPDF/page";
 
-export default function Home() {
-  return (
-    <Wrapper>
-      <HeaderTitle>Tool HTML to PDF</HeaderTitle>
-      <ExportWrapper />
-    </Wrapper>
-  );
+export default function HomePage() {
+  return <HTMLToPDF />;
 }
