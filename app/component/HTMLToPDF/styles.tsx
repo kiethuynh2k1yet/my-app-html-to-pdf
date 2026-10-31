@@ -14,7 +14,6 @@ export const PageContainer = styled.main`
 
 export const ContentContainer = styled.div`
   width: 100%;
-  max-width: 1100px;
   margin: 0 auto;
 `;
 
@@ -44,9 +43,15 @@ export const Description = styled.p`
 export const MainCard = styled.section`
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  align-items: stretch;
 
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+
+  gap: 24px;
   padding: 24px;
+
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   background: #ffffff;

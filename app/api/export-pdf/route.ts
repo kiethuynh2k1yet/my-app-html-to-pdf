@@ -1,5 +1,6 @@
+
 import { NextRequest, NextResponse } from "next/server";
-import { chromium } from "playwright";
+import { chromium, Browser } from "playwright";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,74 +8,118 @@ export const maxDuration = 60;
 
 const MAX_HTML_SIZE = 10 * 1024 * 1024;
 
-function sanitizeFileName(name: string): string {
-  return (
-    name
-      .replace(/[^a-zA-Z0-9_-]/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 80) || "document"
-  );
-}
+const DEFAULT_WIDTH = 794;
+const DEFAULT_HEIGHT = 1123;
+
+const MAX_VIEWPORT_WIDTH = 10000;
+const MAX_VIEWPORT_HEIGHT = 10000;
+
+// 96 CSS pixels = 1 inch = 25.4 mm
+const pxToMm = (px: number) => (px * 25.4) / 96;
 
 export async function POST(request: NextRequest) {
-  let browser;
+  let browser: Browser | null = null;
 
   try {
-    // 1. Kiểm tra Content-Type
-    const contentType = request.headers.get("content-type") || "";
+    console.log("[PDF] Receiving request...");
 
-    if (!contentType.includes("application/json")) {
-      return NextResponse.json(
-        { success: false, message: "Content-Type phải là application/json" },
-        { status: 415 }
-      );
-    }
-
-    // 2. Đọc dữ liệu
+    // Đọc request body duy nhất một lần.
     const body = await request.json();
 
     const html = body?.html;
-    const fileName = sanitizeFileName(
-      typeof body?.fileName === "string" ? body.fileName : "document"
-    );
+    const fileName = body?.fileName || "export";
 
-    if (typeof html !== "string" || !html.trim()) {
+    const previewWidth = Number(body?.previewWidth);
+    const previewHeight = Number(body?.previewHeight);
+
+    // Kiểm tra HTML.
+    if (!html || typeof html !== "string") {
       return NextResponse.json(
-        { success: false, message: "Nội dung HTML không được để trống." },
-        { status: 400 }
+        { message: "HTML không hợp lệ hoặc đang bị trống." },
+        { status: 400 },
       );
     }
 
+    // Kiểm tra dung lượng HTML.
     if (Buffer.byteLength(html, "utf8") > MAX_HTML_SIZE) {
       return NextResponse.json(
-        { success: false, message: "HTML vượt quá giới hạn 10 MB." },
-        { status: 413 }
+        { message: "Dung lượng HTML vượt quá 10MB." },
+        { status: 413 },
       );
     }
 
-    // 3. Khởi chạy Chromium
-    browser = await chromium.launch({
-      headless: true,
+    // Lấy kích thước Preview từ frontend.
+    const viewportWidth = Math.min(
+      MAX_VIEWPORT_WIDTH,
+      Math.max(
+        1,
+        Number.isFinite(previewWidth)
+          ? Math.ceil(previewWidth)
+          : DEFAULT_WIDTH,
+      ),
+    );
+
+    const viewportHeight = Math.min(
+      MAX_VIEWPORT_HEIGHT,
+      Math.max(
+        1,
+        Number.isFinite(previewHeight)
+          ? Math.ceil(previewHeight)
+          : DEFAULT_HEIGHT,
+      ),
+    );
+
+    console.log("[PDF] Preview viewport:", {
+      width: viewportWidth,
+      height: viewportHeight,
     });
 
+    // Khởi chạy Chromium.
+    console.log("[PDF] Starting Chromium...");
+
+    browser = await chromium.launch({
+      headless: true,
+      timeout: 30000,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
+
+    console.log("[PDF] Chromium started successfully!");
+
+    // Tạo page với kích thước giống Preview.
     const page = await browser.newPage({
       viewport: {
-        width: 794,
-        height: 1123,
+        width: viewportWidth,
+        height: viewportHeight,
       },
       deviceScaleFactor: 1,
     });
 
-    // Không thực thi JavaScript trong HTML được nhập
-    await page.setJavaScriptEnabled(false);
+    page.setDefaultTimeout(15000);
 
-    // Chặn truy cập mạng từ HTML nhập vào.
-    // Nếu HTML cần ảnh/font online, cần thiết kế whitelist riêng.
+    // Theo dõi lỗi JavaScript.
+    page.on("pageerror", (error) => {
+      console.error("[PDF] Page error:", error.message);
+    });
+
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        console.error("[PDF] Browser console:", message.text());
+      }
+    });
+
+    // Chặn truy cập file local và javascript URL.
     await page.route("**/*", async (route) => {
       const url = route.request().url();
 
-      if (!url.startsWith("data:") && !url.startsWith("blob:") &&
-          !url.startsWith("about:")) {
+      if (
+        url.startsWith("file:") ||
+        url.startsWith("javascript:")
+      ) {
         await route.abort();
         return;
       }
@@ -82,88 +127,222 @@ export async function POST(request: NextRequest) {
       await route.continue();
     });
 
-    // 4. Render HTML
+    // Giữ chế độ CSS giống Preview.
+    await page.emulateMedia({
+      media: "screen",
+    });
+
+    // Render HTML và chờ tài nguyên tải xong.
+    console.log("[PDF] Setting HTML content...");
+
     await page.setContent(html, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "load",
       timeout: 30000,
     });
 
-    // 5. Đợi font và hình ảnh tải xong
+    console.log("[PDF] HTML loaded.");
+
+    // Chờ JavaScript có thời gian thực thi.
+    await page.waitForTimeout(500);
+
+    // Chờ font tải xong.
+    console.log("[PDF] Waiting for fonts...");
+
     await page.evaluate(async () => {
-      if ("fonts" in document) {
-        await document.fonts.ready;
-      }
-
-      const images = Array.from(document.images);
-
-      await Promise.all(
-        images.map((image) => {
-          if (image.complete) return Promise.resolve();
-
-          return new Promise<void>((resolve) => {
-            image.addEventListener("load", () => resolve(), { once: true });
-            image.addEventListener("error", () => resolve(), { once: true });
-          });
-        })
-      );
+      await Promise.race([
+        document.fonts.ready,
+        new Promise<void>((resolve) =>
+          setTimeout(resolve, 10000),
+        ),
+      ]);
     });
 
-    // 6. Chuyển sang chế độ in
-    await page.emulateMedia({ media: "print" });
+    // Chờ hình ảnh tải và giải mã.
+    console.log("[PDF] Waiting for images...");
 
-    // 7. Xuất PDF A4
+    await page.evaluate(async () => {
+      const images = Array.from(document.images);
+
+      await Promise.race([
+        Promise.all(
+          images.map(async (img) => {
+            if (!img.complete) {
+              await new Promise<void>((resolve) => {
+                img.addEventListener("load", () => resolve(), {
+                  once: true,
+                });
+
+                img.addEventListener("error", () => resolve(), {
+                  once: true,
+                });
+              });
+            }
+
+            if (img.decode) {
+              try {
+                await img.decode();
+              } catch {
+                // Bỏ qua ảnh không giải mã được.
+              }
+            }
+          }),
+        ),
+        new Promise<void>((resolve) =>
+          setTimeout(resolve, 10000),
+        ),
+      ]);
+    });
+
+    // Chờ layout và JavaScript cập nhật DOM hoàn tất.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+          });
+        }),
+    );
+
+    console.log("[PDF] Measuring content dimensions...");
+
+    // Đo kích thước toàn bộ nội dung HTML.
+    const dimensions = await page.evaluate(() => {
+      const htmlElement = document.documentElement;
+      const bodyElement = document.body;
+
+      const width = Math.ceil(
+        Math.max(
+          htmlElement.scrollWidth,
+          htmlElement.offsetWidth,
+          htmlElement.clientWidth,
+          bodyElement?.scrollWidth || 0,
+          bodyElement?.offsetWidth || 0,
+          bodyElement?.clientWidth || 0,
+        ),
+      );
+
+      const height = Math.ceil(
+        Math.max(
+          htmlElement.scrollHeight,
+          htmlElement.offsetHeight,
+          htmlElement.clientHeight,
+          bodyElement?.scrollHeight || 0,
+          bodyElement?.offsetHeight || 0,
+          bodyElement?.clientHeight || 0,
+        ),
+      );
+
+      return {
+        width: Math.max(width, 1),
+        height: Math.max(height, 1),
+      };
+    });
+
+    console.log("[PDF] Content dimensions:", dimensions);
+
+    // Cộng thêm 10px chiều rộng.
+    const pdfWidth = pxToMm(dimensions.width);
+    const pdfHeight = pxToMm(dimensions.height);
+
+    console.log("[PDF] Custom PDF dimensions:", {
+      width: `${pdfWidth.toFixed(2)}mm`,
+      height: `${pdfHeight.toFixed(2)}mm`,
+    });
+
+    // Giữ màu sắc và CSS gần với Preview.
+    await page.addStyleTag({
+      content: `
+        *,
+        *::before,
+        *::after {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+
+        img,
+        svg,
+        canvas,
+        video {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+
+        @page {
+          size: ${pdfWidth}mm ${pdfHeight}mm;
+          margin: 0;
+        }
+      `,
+    });
+
+    // Chờ CSS và layout cập nhật.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+          });
+        }),
+    );
+
+    console.log("[PDF] Generating PDF...");
+
+    // Xuất PDF theo kích thước nội dung thực tế.
     const pdfBuffer = await page.pdf({
-      format: "A4",
+      width: `${pdfWidth}mm`,
+      height: `${pdfHeight}mm`,
       printBackground: true,
       preferCSSPageSize: false,
       displayHeaderFooter: false,
       margin: {
-        top: "10mm",
-        right: "10mm",
-        bottom: "10mm",
-        left: "10mm",
+        top: "0mm",
+        right: "0mm",
+        bottom: "0mm",
+        left: "0mm",
       },
+      scale: 1,
     });
 
-    // 8. Đóng Chromium
-    await browser.close();
-    browser = undefined;
+    console.log("[PDF] PDF generated successfully!");
 
-    // 9. Trả file PDF
+    // Làm sạch tên file.
+    const safeFileName = String(fileName)
+      .replace(/\.pdf$/i, "")
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+      .trim() || "export";
+
     return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${fileName}.pdf"`,
-        "Content-Length": String(pdfBuffer.byteLength),
-        "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="${safeFileName}.pdf"`,
+        "Content-Length": String(pdfBuffer.length),
       },
     });
   } catch (error) {
-    console.error("[EXPORT PDF ERROR]", error);
-
-    if (browser) {
-      await browser.close().catch(() => undefined);
-    }
+    console.error("[PDF] Export error:", error);
 
     const message =
-      error instanceof Error ? error.message : "Lỗi không xác định";
+      error instanceof Error
+        ? error.message
+        : "Không thể xuất PDF.";
 
     return NextResponse.json(
       {
-        success: false,
-        message: "Không thể xuất PDF.",
+        message: "Xuất PDF thất bại.",
         detail: message,
       },
-      { status: 500 }
+      { status: 500 },
     );
-  }
-}
+  } finally {
+    if (browser) {
+      console.log("[PDF] Closing Chromium...");
 
-// API kiểm tra trạng thái
-export async function GET() {
-  return NextResponse.json({
-    success: true,
-    message: "PDF Export API is running.",
-  });
+      try {
+        await browser.close();
+      } catch (error) {
+        console.error("[PDF] Browser close error:", error);
+      }
+    }
+  }
 }
