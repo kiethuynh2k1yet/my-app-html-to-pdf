@@ -13,7 +13,7 @@ export const PageContainer = styled.main`
 `;
 
 export const ContentContainer = styled.div`
-  width: 100%;
+  width: 1123px;
   margin: 0 auto;
 `;
 

@@ -99,7 +99,7 @@ function getContentHeight(doc: Document): number {
     }
 
     const rect = element.getBoundingClientRect();
-
+    
     maxBottom = Math.max(maxBottom, rect.bottom);
   });
 
@@ -406,7 +406,7 @@ export default function ExportPDF({
 
       // Calculate canvas scale.
       const requestedScale = Math.min(
-        3,
+        2,
         MAX_CANVAS_DIMENSION / previewWidth,
       );
 
@@ -448,6 +448,7 @@ export default function ExportPDF({
           height: `${previewHeight}px`,
           minHeight: `${previewHeight}px`,
           margin: "0",
+          padding: "0",
           overflow: "hidden",
         },
       };
