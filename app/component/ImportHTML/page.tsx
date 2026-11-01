@@ -40,6 +40,7 @@ interface ImportHTMLProps {
   onImport: (html: string, fileName: string) => void;
   onRemove: () => void;
   onRenderedHTML: (html: string) => void;
+  onPreviewFrame: (frame: HTMLIFrameElement | null) => void;
   onPreviewSize?: (size: PreviewSize) => void;
 }
 
@@ -53,11 +54,20 @@ export default function ImportHTML({
   onImport,
   onRemove,
   onRenderedHTML,
+  onPreviewFrame,
   onPreviewSize,
 }: ImportHTMLProps) {
   const htmlInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const previewFrameRef = useRef<HTMLIFrameElement>(null);
+
+  const setPreviewFrameRef = useCallback(
+    (frame: HTMLIFrameElement | null) => {
+      previewFrameRef.current = frame;
+      onPreviewFrame(frame);
+    },
+    [onPreviewFrame],
+  );
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -133,7 +143,7 @@ export default function ImportHTML({
       setPreviewHeight(
         Math.max(
           MIN_PREVIEW_HEIGHT,
-          Math.min(height + 30, MAX_PREVIEW_HEIGHT),
+          Math.min(height, MAX_PREVIEW_HEIGHT),
         ),
       );
     };
@@ -613,7 +623,7 @@ export default function ImportHTML({
             </PreviewDescription>
 
             <PreviewFrame
-              ref={previewFrameRef}
+              ref={setPreviewFrameRef}
               title="HTML Preview"
               srcDoc={previewHTML}
               onLoad={handlePreviewLoad}

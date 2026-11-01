@@ -4,7 +4,6 @@ const nextConfig: NextConfig = {
   compiler: {
     styledComponents: true,
   },
-  serverExternalPackages: ["playwright"],
 };
 
 export default nextConfig;

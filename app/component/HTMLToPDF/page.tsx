@@ -28,6 +28,8 @@ export default function HTMLToPDF() {
   const [html, setHtml] = useState("");
   const [renderedHTML, setRenderedHTML] = useState("");
   const [fileName, setFileName] = useState("");
+  const [previewFrame, setPreviewFrame] =
+    useState<HTMLIFrameElement | null>(null);
 
   // Kích thước thực tế của Preview iframe
   const [previewSize, setPreviewSize] = useState<PreviewSize>({
@@ -102,6 +104,7 @@ export default function HTMLToPDF() {
               onImport={handleImport}
               onRemove={handleRemove}
               onRenderedHTML={setRenderedHTML}
+              onPreviewFrame={setPreviewFrame}
               onPreviewSize={handlePreviewSize}
             />
 
@@ -118,13 +121,14 @@ export default function HTMLToPDF() {
                 html={renderedHTML}
                 fileName={fileName || "export"}
                 previewSize={previewSize}
+                previewFrame={previewFrame}
               />
             </Toolbar>
           </MainCard>
 
           <Footer>
             HTML to PDF · Powered by Next.js,
-            Styled Components and Playwright
+            Styled Components, html2canvas and jsPDF
           </Footer>
         </ContentContainer>
       </PageContainer>
